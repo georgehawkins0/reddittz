@@ -5,6 +5,8 @@ import sys
 from datetime import datetime
 import argparse
 import enchant
+from tqdm import tqdm
+import re
 
 
 class Creds:
@@ -31,14 +33,14 @@ def get_cred(credential):
             if cred:
                 return str(cred)
             else:
-                print("Error in creds.yml. Are your credentials in the correct format? \nusername: <username> \npassword: <password>")
+                print("Error in creds.yml. Are your credentials in the correct format? \nuser_agent: <user-agent> \nclient_id: <nclient_id> \nclient_secret: <nclient_secret> \nusername: <username> \npassword: <password>")                
                 sys.exit()
         except FileNotFoundError:
             print("Error: file not found")
             print("\n")
         except TypeError as e:
             if str(e) == "string indices must be integers":
-                print("Error in creds.yml. Are your credentials in the correct format? \nusername: <username> \npassword: <password>")
+                print("Error in creds.yml. Are your credentials in the correct format? \nuser_agent: <user-agent> \nclient_id: <nclient_id> \nclient_secret: <nclient_secret> \nusername: <username> \npassword: <password>")                
                 sys.exit()
 
 def timezonen(hoursDict):
@@ -67,16 +69,31 @@ def timezonen(hoursDict):
         sign=""
     return("timezone= gmt {}{}".format(sign,timezone))
 
+def get_num_comments(username):
+    comments = 0
+    for _ in reddit.redditor(username).comments.new(limit=None):
+        comments +=1
+    return comments
+
+def is_email(email):
+    regex = "^[a-z0-9]+[\._]?[a-z0-9]+[@]\w+[-]?\w+[.]\w{2,3}$"
+    if(re.search(regex,email)):   
+        return True
+    else:   
+        return False
+
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Information about any airport from all over the world.")
+    MAX = 1_000
+    parser = argparse.ArgumentParser(description="Reddit account OSINT.")
+    parser.add_argument('-u', '--username', type=str, default=None, help="The target reddit username.",required=True)
     parser.add_argument('-f', '--frequency', action='store_true',help='Display frequency graph')
     parser.add_argument('-w', '--word', action='store_true',help='Show most commonly used words.')
     parser.add_argument('-d', '--display', action='store_true',help='Display hour frequency graph')
     parser.add_argument('-p', '--percent', action='store_true',help='Display percentages on the hour frequency graph')
-    parser.add_argument('-u', '--username', type=str, default=None, help="The reddit username to crawl.")
-    parser.add_argument('-a', '--amount', type=int, default=20, help="How many of the top n frequently used words are shown.")
-    parser.add_argument('-s', '--spelling', action='store_true',help='Show commonly misspelled words by user.')
+    parser.add_argument('-a', '--amount', type=int, default=20, help="How many of the top n are displayed. For use in args.word and args.spelling.")
+    parser.add_argument('-s', '--spelling', action='store_true',help='Show commonly misspelled words by user using PyEnchant.')
     parser.add_argument('-dc', '--dictionary', type=str, default="en_US", help="The dictionary to check words against")
+    parser.add_argument('-e', '--email', action='store_true',help='Show email addresses commented by a user.')
 
     args = parser.parse_args()
 
@@ -90,14 +107,20 @@ if __name__ == "__main__":
         password = creds.password
     )
 
-    if args.username and args.frequency:
+    if args.frequency:
         total =0
         d = {n: 0 for n in range(24)}
+        tq = tqdm(total=MAX,desc="Fetching comments")
+
         for comment in reddit.redditor(args.username).comments.new(limit=None):
             created_at = comment.created_utc
             t = datetime.utcfromtimestamp(created_at).strftime('%H')
             d[int(t)]+=1
             total+=1
+            tq.update(1)
+
+        tq.update(MAX-tq.n) # because there may not be 1000 comments to incrament it
+        tq.close()
 
         if args.display:
             if args.percent:
@@ -120,6 +143,7 @@ if __name__ == "__main__":
 
     elif args.word:
         d = {}
+        tq = tqdm(total=MAX,desc="Fetching comments")
         for comment in reddit.redditor(args.username).comments.new(limit=None):
             content = comment.body.lower()
             words = [line for line in content.split(' ') if line.strip() != '']
@@ -129,6 +153,10 @@ if __name__ == "__main__":
                     d[word] +=1
                 else:
                     d[word] = 1
+            tq.update(1)
+
+        tq.update(MAX-tq.n) # because there may not be 1000 comments to incrament it
+        tq.close()
                     
         d = dict(sorted(d.items(), reverse=True, key=lambda item: item[1]))
         total_words = len(d)
@@ -141,10 +169,20 @@ if __name__ == "__main__":
 
     elif args.spelling:
         incorrectly_spelled = {}
-        d = enchant.Dict(args.dictionary) 
+        d = enchant.Dict(args.dictionary)
+        tq = tqdm(total=MAX,desc="Fetching comments")
+        comments = []
         for comment in reddit.redditor(args.username).comments.new(limit=None):
             content = comment.body.lower()
-            words = [line for line in content.split(' ') if line.strip() != '']
+            comments.append(content)
+            tq.update(1)
+
+        tq.update(MAX-tq.n) # because there may not be 1000 comments to incrament it
+        tq.close()
+
+        tq = tqdm(total=len(comments),desc="Searching through comments")
+        for comment in comments:
+            words = [line for line in comment.split(' ') if line.strip() != '']
             for word in words:
                 word = ''.join(filter(str.isalnum, word))
                 if word: # because empty strings still get through occasionally
@@ -156,9 +194,40 @@ if __name__ == "__main__":
                         else:
                             incorrectly_spelled[word]+=1
 
-    incorrectly_spelled = dict(sorted(incorrectly_spelled.items(), reverse=True, key=lambda item: item[1]))
-    dict_items = incorrectly_spelled.items()
-    taken = list(dict_items)[:args.amount]
-    for word in taken:
-        frequency_space = " "*(15-len(word[0]))
-        print(f"{word[0]}{frequency_space}x{word[1]}")
+            tq.update(1)
+        tq.close()
+
+        incorrectly_spelled = dict(sorted(incorrectly_spelled.items(), reverse=True, key=lambda item: item[1]))
+        dict_items = incorrectly_spelled.items()
+        taken = list(dict_items)[:args.amount]
+        for word in taken:
+            frequency_space = " "*(15-len(word[0]))
+            print(f"{word[0]}{frequency_space}x{word[1]}")
+
+    elif args.email:
+        tq = tqdm(total=MAX,desc="Fetching Comments")
+        comments = []
+        for comment in reddit.redditor(args.username).comments.new(limit=None):
+            content = comment.body.lower()
+            comments.append(content)
+            tq.update(1)
+
+        tq.update(MAX-tq.n) # because there may not be 1000 comments to incrament it
+        tq.close()
+
+        tq = tqdm(total=len(comments),desc="Searching through comments")
+        found = []
+        for comment in comments:
+            words = [line for line in comment.split(' ') if line.strip() != '']
+            for word in words:
+                word = word.replace(",","")
+                if is_email(word):
+                    found.append(word)
+            tq.update(1)
+
+        tq.close()
+
+        if found != []:
+            print(f"Found {len(found)} email addresses:")
+            for word in found:
+                print(word)
