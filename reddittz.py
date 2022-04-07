@@ -1,10 +1,10 @@
-from http import client
 import praw
 import yaml
 from yaml.loader import FullLoader, Loader
 import sys
 from datetime import datetime
 import argparse
+import enchant
 
 
 class Creds:
@@ -74,6 +74,9 @@ if __name__ == "__main__":
     parser.add_argument('-d', '--display', action='store_true',help='Display hour frequency graph')
     parser.add_argument('-p', '--percent', action='store_true',help='Display percentages on the hour frequency graph')
     parser.add_argument('-u', '--username', type=str, default=None, help="The reddit username to crawl.")
+    parser.add_argument('-a', '--amount', type=int, default=20, help="How many of the top n frequently used words are shown.")
+    parser.add_argument('-s', '--spelling', action='store_true',help='Show commonly misspelled words by user.')
+    parser.add_argument('-dc', '--dictionary', type=str, default="en_US", help="The dictionary to check words against")
 
     args = parser.parse_args()
 
@@ -119,18 +122,9 @@ if __name__ == "__main__":
         d = {}
         for comment in reddit.redditor(args.username).comments.new(limit=None):
             content = comment.body.lower()
-            words = content.split(" ")
+            words = [line for line in content.split(' ') if line.strip() != '']
             for word in words:
-                word = word.replace(",", "")
-                word = word.replace(".", "")
-                word = word.replace("!", "")
-                word = word.replace("?", "")
-                word = word.replace(":", "")
-                word = word.replace(";", "")
-                word = word.replace("\"", "")
-                word = word.replace("*", "")
-                word = word.replace(" ", "")
-                word = word.replace("\n", "")
+                word = ''.join(filter(str.isalnum, word))
                 if word in d and word != "":
                     d[word] +=1
                 else:
@@ -138,6 +132,33 @@ if __name__ == "__main__":
                     
         d = dict(sorted(d.items(), reverse=True, key=lambda item: item[1]))
         total_words = len(d)
-        for word in d:
-            frequency = round((d[word]/total_words)*100)
-            print(f"{word} Frequency: {frequency}%")
+        dict_items = d.items()
+        taken = list(dict_items)[:args.amount]
+        for word in taken:
+            frequency = round((word[1]/total_words)*100,3)
+            frequency_space = " "*(10-len(word[0]))
+            print(f"{word[0]}{frequency_space}{frequency}%")
+
+    elif args.spelling:
+        incorrectly_spelled = {}
+        d = enchant.Dict(args.dictionary) 
+        for comment in reddit.redditor(args.username).comments.new(limit=None):
+            content = comment.body.lower()
+            words = [line for line in content.split(' ') if line.strip() != '']
+            for word in words:
+                word = ''.join(filter(str.isalnum, word))
+                if word: # because empty strings still get through occasionally
+                    valid = d.check(word)
+                    suggestions = d.suggest(word)
+                    if not valid and suggestions != []:
+                        if word not in incorrectly_spelled:
+                            incorrectly_spelled[word] = 1
+                        else:
+                            incorrectly_spelled[word]+=1
+
+    incorrectly_spelled = dict(sorted(incorrectly_spelled.items(), reverse=True, key=lambda item: item[1]))
+    dict_items = incorrectly_spelled.items()
+    taken = list(dict_items)[:args.amount]
+    for word in taken:
+        frequency_space = " "*(15-len(word[0]))
+        print(f"{word[0]}{frequency_space}x{word[1]}")
