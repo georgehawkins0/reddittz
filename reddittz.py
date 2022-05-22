@@ -7,6 +7,7 @@ import argparse
 import enchant
 from tqdm import tqdm
 import re
+import os
 
 
 class Creds:
@@ -82,6 +83,29 @@ def is_email(email):
     else:   
         return False
 
+def clear():
+    # for windows screen
+    if sys.platform.startswith('win'):
+        os.system('cls')
+    # for mac or linux          
+    else:
+        os.system('clear')
+
+
+def banner():
+    clear()
+    print("""
+
+    ██████╗ ███████╗██████╗ ██████╗ ██╗████████╗████████╗███████╗
+    ██╔══██╗██╔════╝██╔══██╗██╔══██╗██║╚══██╔══╝╚══██╔══╝╚══███╔╝
+    ██████╔╝█████╗  ██║  ██║██║  ██║██║   ██║      ██║     ███╔╝ 
+    ██╔══██╗██╔══╝  ██║  ██║██║  ██║██║   ██║  ==  ██║    ███╔╝  
+    ██║  ██║███████╗██████╔╝██████╔╝██║   ██║      ██║   ███████╗
+    ╚═╝  ╚═╝╚══════╝╚═════╝ ╚═════╝ ╚═╝   ╚═╝      ╚═╝   ╚══════╝
+                                                             
+                        Reddit user OSINT
+                    github.com/georgehawkins0 \n\n""")
+
 if __name__ == "__main__":
     MAX = 1_000
     parser = argparse.ArgumentParser(description="Reddit account OSINT.")
@@ -108,6 +132,7 @@ if __name__ == "__main__":
     )
 
     if args.frequency:
+        banner()
         total =0
         d = {n: 0 for n in range(24)}
         tq = tqdm(total=MAX,desc="Fetching comments")
@@ -142,6 +167,7 @@ if __name__ == "__main__":
         print("\n",tz)
 
     elif args.word:
+        banner()
         d = {}
         tq = tqdm(total=MAX,desc="Fetching comments")
         for comment in reddit.redditor(args.username).comments.new(limit=None):
@@ -168,6 +194,7 @@ if __name__ == "__main__":
             print(f"{word[0]}{frequency_space}{frequency}%")
 
     elif args.spelling:
+        banner()
         incorrectly_spelled = {}
         d = enchant.Dict(args.dictionary)
         tq = tqdm(total=MAX,desc="Fetching comments")
@@ -205,6 +232,7 @@ if __name__ == "__main__":
             print(f"{word[0]}{frequency_space}x{word[1]}")
 
     elif args.email:
+        banner()
         tq = tqdm(total=MAX,desc="Fetching Comments")
         comments = []
         for comment in reddit.redditor(args.username).comments.new(limit=None):
